@@ -1,0 +1,12 @@
+
+version: '3'
+services:
+  azcache_test:
+    restart: always
+    image: arafato/azurite
+    volumes:
+      - ./azurite:/opt/azurite/folder
+    ports:
+      - "10000:10000"
+    environment:
+      executable: blob
