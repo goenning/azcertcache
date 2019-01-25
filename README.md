@@ -2,7 +2,7 @@
 
 # azcertcache
 
-Azure Blob Storage cache for [acme/autocert](https://godoc.org/golang.org/x/crypto/acme/autocert) written in Go.
+[Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/) cache for [acme/autocert](https://godoc.org/golang.org/x/crypto/acme/autocert) written in Go.
 
 ## Example
 
