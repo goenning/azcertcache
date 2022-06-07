@@ -2,146 +2,161 @@ package azcertcache_test
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
-	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/Azure/azure-storage-blob-go/azblob"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/goenning/azcertcache"
 )
 
-func expectNotNil(t *testing.T, v interface{}) {
-	if v == nil {
-		t.Errorf("should not be nil")
-	}
-}
+// NOTE: replace account name and key with your own Azure storage credential
+const accountName = "devstoreaccount1"
+const accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 
-func expectNil(t *testing.T, v interface{}) {
-	if v != nil {
-		t.Errorf("should be nil, but was %v", v)
-	}
-}
+// Bad account key encoded in base64 that would fail the authentication check
+const badAccountKey = "YmFkY3JlZGVudGlhbA==" // base64: "badcredential"
 
-func expectEquals(t *testing.T, v interface{}, expected interface{}) {
-	if !reflect.DeepEqual(v, expected) {
-		t.Errorf("should be %v, but was %v", expected, v)
-	}
-}
+func newCache(t *testing.T, containerPrefix string, accountKey string) (*azcertcache.Cache, error) {
+	// Append test name after the container prefix to make them different.
+	// This avoids "ContainerBeingDeleted" error when creating new containers
+	// in different unit tests.
+	containerName := fmt.Sprintf("%s-%s", containerPrefix, t.Name())
 
-func newCache(t *testing.T, containerName string) *azcertcache.Cache {
-	accountName := "devstoreaccount1"
-	accountKey := "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
-	endpointURL := "http://localhost:10000/devstoreaccount1"
+	// Sanitize: container names must only contain lower case, numbers, or hyphens
+	containerName = strings.ToLower(containerName)
+	containerName = strings.Replace(containerName, "_", "", -1)
 
+	endpointURL := fmt.Sprintf("https://%s.blob.core.windows.net", accountName)
 	cache, err := azcertcache.NewWithEndpoint(accountName, accountKey, containerName, endpointURL)
-	expectNil(t, err)
-
-	err = cache.DeleteContainer(context.Background())
-	expectNil(t, err)
+	if err != nil {
+		// Failed to create new blob storage endpoint. Return the error
+		return nil, err
+	}
 
 	err = cache.CreateContainer(context.Background())
-	expectNil(t, err)
-	return cache
+	assert.Nil(t, err)
+
+	t.Cleanup(func() {
+		err = cache.DeleteContainer(context.Background())
+		assert.Nil(t, err)
+	})
+	return cache, nil
 }
 
 func TestNew(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, err := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
+	assert.Nil(t, err)
+}
+
+func TestNew_BadCredential(t *testing.T) {
+	// Sanity check that badAccountKey isn't the same as the actual key
+	assert.NotEqual(t, accountKey, badAccountKey)
+
+	cache, err := newCache(t, "testcontainer", badAccountKey)
+	assert.Nil(t, cache)
+	assert.NotNil(t, err)
+	stgErr, _ := err.(azblob.StorageError)
+	assert.Equal(t, stgErr.ServiceCode(), azblob.ServiceCodeAuthenticationFailed)
 }
 
 func TestGet_UnkownKey(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 	data, err := cache.Get(context.Background(), "my-key")
-	expectEquals(t, err, autocert.ErrCacheMiss)
-	expectEquals(t, len(data), 0)
+	assert.Equal(t, err, autocert.ErrCacheMiss)
+	assert.Equal(t, len(data), 0)
 }
 
 func TestGet_AfterPut(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 
 	actual, _ := ioutil.ReadFile("./LICENSE")
 	err := cache.Put(context.Background(), "my-key", actual)
-	expectNil(t, err)
+	assert.Nil(t, err)
 
 	data, err := cache.Get(context.Background(), "my-key")
-	expectNil(t, err)
-	expectEquals(t, data, actual)
+	assert.Nil(t, err)
+	assert.Equal(t, data, actual)
 }
 
 func TestGet_AfterDelete(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 
 	actual := []byte{1, 2, 3, 4}
 	err := cache.Put(context.Background(), "my-key", actual)
-	expectNil(t, err)
+	assert.Nil(t, err)
 
 	err = cache.Delete(context.Background(), "my-key")
-	expectNil(t, err)
+	assert.Nil(t, err)
 
 	data, err := cache.Get(context.Background(), "my-key")
-	expectEquals(t, err, autocert.ErrCacheMiss)
-	expectEquals(t, len(data), 0)
+	assert.Equal(t, err, autocert.ErrCacheMiss)
+	assert.Equal(t, len(data), 0)
 }
 
 func TestDelete_UnkownKey(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 
 	var err error
 
 	err = cache.Delete(context.Background(), "my-key1")
-	expectNil(t, err)
+	assert.Nil(t, err)
 	err = cache.Delete(context.Background(), "other-key")
-	expectNil(t, err)
+	assert.Nil(t, err)
 	err = cache.Delete(context.Background(), "hello-world")
-	expectNil(t, err)
+	assert.Nil(t, err)
 }
 
 func TestPut_Overwrite(t *testing.T) {
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 
 	data1 := []byte{1, 2, 3, 4}
 	err := cache.Put(context.Background(), "thekey", data1)
-	expectNil(t, err)
-	data, err := cache.Get(context.Background(), "thekey")
-	expectEquals(t, data, data1)
+	assert.Nil(t, err)
+	data, _ := cache.Get(context.Background(), "thekey")
+	assert.Equal(t, data, data1)
 
 	data2 := []byte{5, 6, 7, 8}
 	err = cache.Put(context.Background(), "thekey", data2)
-	expectNil(t, err)
-	data, err = cache.Get(context.Background(), "thekey")
-	expectEquals(t, data, data2)
+	assert.Nil(t, err)
+	data, _ = cache.Get(context.Background(), "thekey")
+	assert.Equal(t, data, data2)
 }
 
 func TestDifferentContainer(t *testing.T) {
-	cache1 := newCache(t, "testcontainer1")
-	cache2 := newCache(t, "testcontainer2")
+	cache1, _ := newCache(t, "testcontainer1", accountKey)
+	cache2, _ := newCache(t, "testcontainer2", accountKey)
 
 	input := []byte{1, 2, 3, 4}
 	err := cache1.Put(context.Background(), "thekey.txt", input)
-	expectNil(t, err)
+	assert.Nil(t, err)
 
 	data, err := cache1.Get(context.Background(), "thekey.txt")
-	expectEquals(t, data, input)
-	expectNil(t, err)
+	assert.Equal(t, data, input)
+	assert.Nil(t, err)
 
 	data, err = cache2.Get(context.Background(), "thekey.txt")
-	expectEquals(t, len(data), 0)
-	expectEquals(t, err, autocert.ErrCacheMiss)
+	assert.Equal(t, len(data), 0)
+	assert.Equal(t, err, autocert.ErrCacheMiss)
 }
 
 func TestGet_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cache := newCache(t, "testcontainer")
-	expectNotNil(t, cache)
+	cache, _ := newCache(t, "testcontainer", accountKey)
+	assert.NotNil(t, cache)
 	data, err := cache.Get(ctx, "my-key")
-	expectNotNil(t, err)
-	expectEquals(t, len(data), 0)
+	assert.NotNil(t, err)
+	assert.Equal(t, len(data), 0)
 }

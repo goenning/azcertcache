@@ -59,6 +59,13 @@ func NewWithEndpoint(accountName, accountKey, containerName, endpointURL string)
 	serviceURL := azblob.NewServiceURL(*endpoint, pipeline)
 	containerURL := serviceURL.NewContainerURL(containerName)
 
+	// Use GetAccountInfo to contact Azure endpoint and check the credential
+	// Returns "AuthenticationFailed" if credential is bad
+	_, err = containerURL.GetAccountInfo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
 	return &Cache{
 		containerURL: containerURL,
 	}, nil
@@ -83,7 +90,7 @@ func (c *Cache) CreateContainer(ctx context.Context) error {
 // If there's no such key, Get returns ErrCacheMiss.
 func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
 	blobURL := c.containerURL.NewBlockBlobURL(key)
-	get, err := blobURL.Download(ctx, 0, 0, azblob.BlobAccessConditions{}, false)
+	get, err := blobURL.Download(ctx, 0, 0, azblob.BlobAccessConditions{}, false, azblob.ClientProvidedKeyOptions{})
 
 	if isNotFound(err) {
 		return nil, autocert.ErrCacheMiss
@@ -104,9 +111,18 @@ func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
 // Put stores the data in the cache under the specified key.
 func (c *Cache) Put(ctx context.Context, key string, data []byte) error {
 	blobURL := c.containerURL.NewBlockBlobURL(key)
-	_, err := blobURL.Upload(ctx, bytes.NewReader(data), azblob.BlobHTTPHeaders{
-		ContentType: "application/x-pem-file",
-	}, azblob.Metadata{}, azblob.BlobAccessConditions{})
+	_, err := blobURL.Upload(
+		ctx, bytes.NewReader(data),
+		azblob.BlobHTTPHeaders{
+			ContentType: "application/x-pem-file",
+		},
+		azblob.Metadata{},
+		azblob.BlobAccessConditions{},
+		azblob.DefaultAccessTier,
+		nil, // blobTagsMap
+		azblob.ClientProvidedKeyOptions{},
+		azblob.ImmutabilityPolicyOptions{},
+	)
 	return err
 }
 
