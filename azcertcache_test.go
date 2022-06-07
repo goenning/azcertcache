@@ -14,6 +14,7 @@ import (
 	"github.com/goenning/azcertcache"
 )
 
+// NOTE: replace account name and key with your own Azure storage credential
 const accountName = "devstoreaccount1"
 const accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 
@@ -48,8 +49,9 @@ func newCache(t *testing.T, containerPrefix string, accountKey string) (*azcertc
 }
 
 func TestNew(t *testing.T) {
-	cache, _ := newCache(t, "testcontainer", accountKey)
+	cache, err := newCache(t, "testcontainer", accountKey)
 	assert.NotNil(t, cache)
+	assert.Nil(t, err)
 }
 
 func TestNew_BadCredential(t *testing.T) {
