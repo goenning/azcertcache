@@ -55,6 +55,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestNew_BadCredential(t *testing.T) {
+	// Sanity check that badAccountKey isn't the same as the actual key
+	assert.NotEqual(t, accountKey, badAccountKey)
+
 	cache, err := newCache(t, "testcontainer", badAccountKey)
 	assert.Nil(t, cache)
 	assert.NotNil(t, err)
